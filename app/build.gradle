@@ -77,7 +77,7 @@ android {
         compileSdk 34
         minSdkVersion 23
         targetSdkVersion 34
-        applicationId "co.median.android.dqdjkl"
+        applicationId "co.median.android"
         versionCode 5
         multiDexEnabled true
         vectorDrawables.useSupportLibrary = true

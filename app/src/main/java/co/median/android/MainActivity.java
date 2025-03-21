@@ -76,6 +76,7 @@ import com.google.android.gms.ads.FullScreenContentCallback;
 import com.google.android.gms.ads.LoadAdError;
 import com.google.android.gms.ads.MobileAds;
 import com.google.android.gms.ads.OnUserEarnedRewardListener;
+import com.google.android.gms.ads.RequestConfiguration;
 import com.google.android.gms.ads.initialization.InitializationStatus;
 import com.google.android.gms.ads.initialization.OnInitializationCompleteListener;
 import com.google.android.gms.ads.rewarded.RewardItem;
@@ -91,6 +92,7 @@ import java.io.File;
 import java.net.CookieHandler;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -230,7 +232,13 @@ public class MainActivity extends AppCompatActivity implements Observer,
                 @Override
                 public void onInitializationComplete(InitializationStatus initializationStatus) {
                     Log.d(TAG, "AdMob initialized successfully");
-                    loadRewardedAd(); // Load the ad after initialization
+                    // Add Test Device
+                    List<String> testDeviceIds = Arrays.asList("2C035CB581762CA271F2C5E1A734FB3B");
+                    RequestConfiguration configuration = new RequestConfiguration.Builder()
+                            .setTestDeviceIds(testDeviceIds)
+                            .build();
+                    MobileAds.setRequestConfiguration(configuration);
+                    loadRewardedAdWithRetry();
                 }
             });
             Log.d(TAG, "After initializing AdMob");
@@ -242,26 +250,8 @@ public class MainActivity extends AppCompatActivity implements Observer,
 
             if (this.isRoot) {
                 SplashScreen splashScreen = SplashScreen.installSplashScreen(this);
-                boolean configChanged = savedInstanceState != null && savedInstanceState.getBoolean(CONFIGURATION_CHANGED, false);
-
-                if (appConfig.splashScreen.getIsAnimated() && !configChanged) {
-                    splashScreen.setOnExitAnimationListener(provider -> {
-                        this.splashScreenViewProvider = provider;
-
-                        application.mBridge.animatedSplashScreen(this, provider, () -> {
-                            if (this.isContentReady) {
-                                this.removeSplashWithAnimation();
-                            } else {
-                                this.shouldRemoveSplash = true;
-                            }
-                        });
-
-                        new Handler(Looper.getMainLooper()).postDelayed(this::removeSplashWithAnimation, 7000);
-                    });
-                } else {
-                    splashScreen.setKeepOnScreenCondition(() -> !isContentReady);
-                    new Handler(Looper.getMainLooper()).postDelayed(this::contentReady, 7000);
-                }
+                splashScreen.setKeepOnScreenCondition(() -> !isContentReady);
+                new Handler(Looper.getMainLooper()).postDelayed(this::contentReady, 7000);
             }
 
             this.launchSource = getIntent().getStringExtra("source");
@@ -281,35 +271,15 @@ public class MainActivity extends AppCompatActivity implements Observer,
             this.appTheme = ThemeUtils.getConfigAppTheme(this);
 
             if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.R) {
-                boolean ignoreThemeUpdate = false;
-                if (savedInstanceState != null) {
-                    ignoreThemeUpdate = savedInstanceState.getBoolean(SAVED_STATE_IGNORE_THEME_SETUP, false);
-                }
-
-                if (ignoreThemeUpdate) {
-                    Log.d(TAG, "onCreate: configuration change from setupAppTheme(), ignoring theme setup");
-                } else {
-                    ThemeUtils.setAppThemeApi30AndBelow(appTheme);
-                }
+                ThemeUtils.setAppThemeApi30AndBelow(appTheme);
             }
 
             this.activityId = UUID.randomUUID().toString();
             int urlLevel = getIntent().getIntExtra("urlLevel", -1);
             int parentUrlLevel = getIntent().getIntExtra("parentUrlLevel", -1);
 
-            if (savedInstanceState != null) {
-                this.activityId = savedInstanceState.getString(SAVED_STATE_ACTIVITY_ID, activityId);
-                this.isRoot = savedInstanceState.getBoolean(SAVED_STATE_IS_ROOT, isRoot);
-                urlLevel = savedInstanceState.getInt(SAVED_STATE_URL_LEVEL, urlLevel);
-                parentUrlLevel = savedInstanceState.getInt(SAVED_STATE_PARENT_URL_LEVEL, parentUrlLevel);
-            }
-
             windowManager.addNewWindow(activityId, isRoot);
             windowManager.setUrlLevels(activityId, urlLevel, parentUrlLevel);
-
-            if (appConfig.maxWindowsEnabled) {
-                windowManager.setIgnoreInterceptMaxWindows(activityId, getIntent().getBooleanExtra(EXTRA_IGNORE_INTERCEPT_MAXWINDOWS, false));
-            }
 
             if (isRoot) {
                 initialRootSetup();
@@ -326,7 +296,7 @@ public class MainActivity extends AppCompatActivity implements Observer,
             });
             this.appBrowserActivityLauncher = registerForActivityResult(
                     new ActivityResultContracts.StartActivityForResult(), result -> {
-                        String callback = LeanUtils.createJsForCallback(CALLBACK_APP_BROWSER_CLOSED, null);
+                        String callback = LeanUtils.createJsForCallback("app_browser_closed", null);
                         runJavascript(callback);
                     });
 
@@ -341,24 +311,6 @@ public class MainActivity extends AppCompatActivity implements Observer,
             application.mBridge.onActivityCreate(this, isRoot);
 
             final ViewGroup content = findViewById(android.R.id.content);
-
-            // Add touch listener to content view
-            content.setOnTouchListener(new View.OnTouchListener() {
-                @Override
-                public boolean onTouch(View v, MotionEvent event) {
-                    Log.d(TAG, "Touch event received: " + event.getAction());
-                    if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                        clickCount++;
-                        Log.d(TAG, "Click detected on content view, count: " + clickCount);
-                        if (clickCount >= 3) {
-                            Log.d(TAG, "Attempting to show rewarded ad from content view");
-                            showRewardedAd();
-                            clickCount = 0;
-                        }
-                    }
-                    return false;
-                }
-            });
 
             this.fullScreenLayout = findViewById(R.id.fullscreen);
             swipeRefreshLayout = findViewById(R.id.swipe_refresh);
@@ -426,11 +378,6 @@ public class MainActivity extends AppCompatActivity implements Observer,
                 }
             });
 
-            swipeRefreshLayout.setColorSchemeColors(ContextCompat.getColor(this, R.color.pull_to_refresh_color));
-            swipeNavLayout.setActiveColor(ContextCompat.getColor(this, R.color.pull_to_refresh_color));
-            swipeRefreshLayout.setProgressBackgroundColorSchemeColor(ContextCompat.getColor(this, R.color.swipe_nav_background));
-            swipeNavLayout.setBackgroundColor(ContextCompat.getColor(this, R.color.swipe_nav_background));
-
             this.mProgress = findViewById(R.id.progress);
             MedianProgressViewItem progressItem = application.mBridge.getProgressView(this);
             if (progressItem != null) {
@@ -439,7 +386,7 @@ public class MainActivity extends AppCompatActivity implements Observer,
                 this.mProgress.setupDefaultProgress();
             }
 
-            CookieHandler.setDefault(new WebkitCookieManagerProxy());
+            CookieManager.getInstance().setAcceptCookie(true);
 
             this.postLoadJavascript = getIntent().getStringExtra("postLoadJavascript");
             this.postLoadJavascriptForRefresh = this.postLoadJavascript;
@@ -468,49 +415,32 @@ public class MainActivity extends AppCompatActivity implements Observer,
             this.mWebview = this.mWebviewContainer.getWebview();
             this.urlLoader = new UrlLoader(this, !appConfig.injectMedianJS);
 
+            // Add touch listener to content view instead of mWebviewContainer
+
             this.mWebviewContainer.setupWebview(this, isRoot);
             setupWebviewTheme(appTheme);
 
-            boolean isWebViewStateRestored = false;
-            if (savedInstanceState != null) {
-                Bundle webViewStateBundle = savedInstanceState.getBundle(SAVED_STATE_WEBVIEW_STATE);
-                if (webViewStateBundle != null) {
-                    mWebview.restoreStateFromBundle(webViewStateBundle);
-                    isWebViewStateRestored = true;
-                }
-
-                int scrollX = savedInstanceState.getInt(SAVED_STATE_SCROLL_X, 0);
-                int scrollY = savedInstanceState.getInt(SAVED_STATE_SCROLL_Y, 0);
-                mWebview.scrollTo(scrollX, scrollY);
-            }
-
             String url;
-            if (isWebViewStateRestored && !TextUtils.isEmpty(mWebview.getUrl())) {
-                url = mWebview.getUrl();
-            } else {
-                Intent intent = getIntent();
-                url = getUrlFromIntent(intent);
+            Intent intent = getIntent();
+            url = getUrlFromIntent(intent);
 
-                if (url == null && isRoot) url = appConfig.getInitialUrl();
-                if (url == null) url = intent.getStringExtra("url");
+            if (url == null && isRoot) url = appConfig.getInitialUrl();
+            if (url == null) url = intent.getStringExtra("url");
 
-                if (url != null) {
-                    Map<String, String> queries = application.mBridge.getInitialUrlQueryItems(this, isRoot);
-                    if (queries != null && !queries.isEmpty()) {
-                        Uri.Builder builder = Uri.parse(url).buildUpon();
-                        for (Map.Entry<String, String> entry : queries.entrySet()) {
-                            builder.appendQueryParameter(entry.getKey(), entry.getValue());
-                        }
-                        url = builder.build().toString();
+            if (url != null) {
+                Map<String, String> queries = application.mBridge.getInitialUrlQueryItems(this, isRoot);
+                if (queries != null && !queries.isEmpty()) {
+                    Uri.Builder builder = Uri.parse(url).buildUpon();
+                    for (Map.Entry<String, String> entry : queries.entrySet()) {
+                        builder.appendQueryParameter(entry.getKey(), entry.getValue());
                     }
-
-                    this.initialUrl = url;
-                    this.mWebview.loadUrl(url);
-                } else if (intent.getBooleanExtra(EXTRA_WEBVIEW_WINDOW_OPEN, false)) {
-                    // No worries, loadUrl will be called when this new web view is passed back to the message
-                } else {
-                    GNLog.getInstance().logError(TAG, "No url specified for MainActivity");
+                    url = builder.build().toString();
                 }
+
+                this.initialUrl = url;
+                this.mWebview.loadUrl(url);
+            } else {
+                GNLog.getInstance().logError(TAG, "No url specified for MainActivity");
             }
 
             actionManager.setTitleDisplayForUrl(url, true);
@@ -518,9 +448,9 @@ public class MainActivity extends AppCompatActivity implements Observer,
             sideNavManager.showNavigationMenu(isRoot && appConfig.showNavigationMenu);
 
             ViewCompat.setOnApplyWindowInsetsListener(content, (v, insets) -> {
-                Insets systemBarInsets = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+                WindowInsetsCompat Insets = insets;
                 LinearLayout.LayoutParams layoutParams = (LinearLayout.LayoutParams) content.getLayoutParams();
-                layoutParams.bottomMargin = systemBarInsets.bottom;
+                layoutParams.bottomMargin = Insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom;
 
                 return WindowInsetsCompat.CONSUMED;
             });
@@ -531,68 +461,24 @@ public class MainActivity extends AppCompatActivity implements Observer,
 
             this.keyboardManager = new KeyboardManager(this, content);
 
-            this.navigationTitlesChangedReceiver = new BroadcastReceiver() {
-                @Override
-                public void onReceive(Context context, Intent intent) {
-                    if (AppConfig.PROCESSED_NAVIGATION_TITLES.equals(intent.getAction())) {
-                        String url = mWebview.getUrl();
-                        if (url == null) return;
-                        String title = titleForUrl(url);
-                        if (title != null) {
-                            setTitle(title);
-                        } else {
-                            setupTitleDisplayForUrl(url);
-                        }
-                    }
-                }
-            };
-            LocalBroadcastManager.getInstance(this).registerReceiver(this.navigationTitlesChangedReceiver,
-                    new IntentFilter(AppConfig.PROCESSED_NAVIGATION_TITLES));
-
-            this.navigationLevelsChangedReceiver = new BroadcastReceiver() {
-                @Override
-                public void onReceive(Context context, Intent intent) {
-                    if (AppConfig.PROCESSED_NAVIGATION_LEVELS.equals(intent.getAction())) {
-                        String url = mWebview.getUrl();
-                        if (url == null) return;
-                        int level = urlLevelForUrl(url);
-                        setUrlLevel(level);
-                    }
-                }
-            };
-            LocalBroadcastManager.getInstance(this).registerReceiver(this.navigationLevelsChangedReceiver,
-                    new IntentFilter(AppConfig.PROCESSED_NAVIGATION_LEVELS));
-
-            this.webviewLimitReachedReceiver = new BroadcastReceiver() {
-                @Override
-                public void onReceive(Context context, Intent intent) {
-                    if (BROADCAST_RECEIVER_ACTION_WEBVIEW_LIMIT_REACHED.equals(intent.getAction())) {
-                        String excessWindowId = intent.getStringExtra(EXTRA_EXCESS_WINDOW_ID);
-                        if (!TextUtils.isEmpty(excessWindowId)) {
-                            if (excessWindowId.equals(activityId)) finish();
-                            return;
-                        }
-
-                        boolean isActivityRoot = getGNWindowManager().isRoot(activityId);
-                        if (!isActivityRoot) {
-                            finish();
-                        }
-                    }
-                }
-            };
-            LocalBroadcastManager.getInstance(this).registerReceiver(this.webviewLimitReachedReceiver,
-                    new IntentFilter(BROADCAST_RECEIVER_ACTION_WEBVIEW_LIMIT_REACHED));
-
-            validateGoogleService();
-
-            if (appConfig.geckoViewEnabled) {
-                this.removeSplashWithAnimation();
-            }
-
             setContextMenuEnabled(appConfig.contextMenuConfig.getEnabled());
         } catch (Exception e) {
             Log.e(TAG, "Error in onCreate: " + e.getMessage(), e);
         }
+    }
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        Log.d(TAG, "Touch event received in dispatchTouchEvent: " + event.getAction());
+        if (event.getAction() == MotionEvent.ACTION_DOWN) {
+            clickCount++;
+            Log.d(TAG, "Click detected in dispatchTouchEvent, count: " + clickCount);
+            if (clickCount >= 3) {
+                Log.d(TAG, "Attempting to show rewarded ad from dispatchTouchEvent");
+                showRewardedAd();
+                clickCount = 0;
+            }
+        }
+        return super.dispatchTouchEvent(event); // Pass the event to the views
     }
     private void loadRewardedAd() {
         if (cm.getActiveNetworkInfo() != null && cm.getActiveNetworkInfo().isConnected()) {
@@ -614,6 +500,17 @@ public class MainActivity extends AppCompatActivity implements Observer,
             Log.e(TAG, "No internet connection, cannot load rewarded ad");
         }
     }
+
+    private void loadRewardedAdWithRetry() {
+        loadRewardedAd();
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            if (rewardedAd == null) {
+                Log.d(TAG, "Retrying to load rewarded ad...");
+                loadRewardedAd();
+            }
+        }, 5000);
+    }
+
     private void showRewardedAd() {
         if (rewardedAd != null) {
             Log.d(TAG, "Showing rewarded ad");
@@ -628,19 +525,19 @@ public class MainActivity extends AppCompatActivity implements Observer,
                 public void onAdDismissedFullScreenContent() {
                     Log.d(TAG, "Ad dismissed");
                     rewardedAd = null;
-                    loadRewardedAd();
+                    loadRewardedAdWithRetry();
                 }
 
                 @Override
                 public void onAdFailedToShowFullScreenContent(@NonNull AdError adError) {
                     Log.e(TAG, "Ad failed to show: " + adError.getMessage());
                     rewardedAd = null;
-                    loadRewardedAd();
+                    loadRewardedAdWithRetry();
                 }
             });
         } else {
             Log.d(TAG, "Rewarded ad not ready yet");
-            loadRewardedAd();
+            loadRewardedAdWithRetry();
         }
     }
     public String getActivityId() {
