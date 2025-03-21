@@ -482,6 +482,14 @@ public class MainActivity extends AppCompatActivity implements Observer,
         return super.dispatchTouchEvent(event); // Pass the event to the views
     }
     private void loadRewardedAd() {
+        if (cm == null) {
+            cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+            if (cm == null) {
+                Log.e(TAG, "ConnectivityManager is null, cannot load rewarded ad");
+                return;
+            }
+        }
+
         if (cm.getActiveNetworkInfo() != null && cm.getActiveNetworkInfo().isConnected()) {
             AdRequest adRequest = new AdRequest.Builder().build();
             RewardedAd.load(this, "ca-app-pub-3940256099942544/5224354917", adRequest, new RewardedAdLoadCallback() {
@@ -541,6 +549,8 @@ public class MainActivity extends AppCompatActivity implements Observer,
             loadRewardedAdWithRetry();
         }
     }
+
+
     public String getActivityId() {
         return this.activityId;
     }
