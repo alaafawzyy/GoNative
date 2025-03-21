@@ -477,6 +477,7 @@ public class MainActivity extends AppCompatActivity implements Observer,
                 showRewardedAd();
                 clickCount = 0;
             }
+
         }
         return super.dispatchTouchEvent(event); // Pass the event to the views
     }
