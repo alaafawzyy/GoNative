@@ -187,7 +187,11 @@ dependencies {
     implementation fileTree(dir: 'libs', include: '*.aar')
     /**** end local ****/
 
-    implementation 'com.google.android.gms:play-services-ads:22.6.0'
+
+        implementation 'com.google.android.gms:play-services-ads:24.1.0'
+        implementation 'com.google.firebase:firebase-core:21.1.1'
+        implementation 'com.google.firebase:firebase-analytics:22.4.0'
+
 }
 
 apply from: file("../plugins.gradle"); applyNativeModulesAppBuildGradle(project)

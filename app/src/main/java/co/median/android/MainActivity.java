@@ -70,7 +70,9 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 import androidx.webkit.WebSettingsCompat;
 import androidx.webkit.WebViewFeature;
 
+import com.google.android.gms.ads.AdError;
 import com.google.android.gms.ads.AdRequest;
+import com.google.android.gms.ads.FullScreenContentCallback;
 import com.google.android.gms.ads.LoadAdError;
 import com.google.android.gms.ads.MobileAds;
 import com.google.android.gms.ads.OnUserEarnedRewardListener;
@@ -217,6 +219,7 @@ public class MainActivity extends AppCompatActivity implements Observer,
     private int clickCount = 0;
     private RewardedAd rewardedAd;
 
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -237,7 +240,6 @@ public class MainActivity extends AppCompatActivity implements Observer,
             GoNativeWindowManager windowManager = application.getWindowManager();
             this.isRoot = getIntent().getBooleanExtra("isRoot", true);
 
-            // Splash events
             if (this.isRoot) {
                 SplashScreen splashScreen = SplashScreen.installSplashScreen(this);
                 boolean configChanged = savedInstanceState != null && savedInstanceState.getBoolean(CONFIGURATION_CHANGED, false);
@@ -319,7 +321,6 @@ public class MainActivity extends AppCompatActivity implements Observer,
             this.fileDownloader = new FileDownloader(this);
             this.eventsManager = new MedianEventsManager(this);
 
-            // register launchers
             this.requestPermissionLauncher = registerForActivityResult(new ActivityResultContracts.RequestPermission(), isGranted -> {
                 runGonativeDeviceInfo(deviceInfoCallback, false);
             });
@@ -331,7 +332,6 @@ public class MainActivity extends AppCompatActivity implements Observer,
 
             this.locationServiceHelper = new LocationServiceHelper(this);
 
-            // webview pools
             application.getWebViewPool().init(this);
 
             cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
@@ -342,20 +342,21 @@ public class MainActivity extends AppCompatActivity implements Observer,
 
             final ViewGroup content = findViewById(android.R.id.content);
 
-            // Add touch listener to the decor view to detect clicks anywhere
-            getWindow().getDecorView().setOnTouchListener(new View.OnTouchListener() {
+            // Add touch listener to content view
+            content.setOnTouchListener(new View.OnTouchListener() {
                 @Override
                 public boolean onTouch(View v, MotionEvent event) {
+                    Log.d(TAG, "Touch event received: " + event.getAction());
                     if (event.getAction() == MotionEvent.ACTION_DOWN) {
                         clickCount++;
-                        Log.d(TAG, "Click detected on decor view, count: " + clickCount);
+                        Log.d(TAG, "Click detected on content view, count: " + clickCount);
                         if (clickCount >= 3) {
-                            Log.d(TAG, "Attempting to show rewarded ad from decor view");
+                            Log.d(TAG, "Attempting to show rewarded ad from content view");
                             showRewardedAd();
                             clickCount = 0;
                         }
                     }
-                    return false; // Allow other views to process the touch too
+                    return false;
                 }
             });
 
@@ -430,7 +431,6 @@ public class MainActivity extends AppCompatActivity implements Observer,
             swipeRefreshLayout.setProgressBackgroundColorSchemeColor(ContextCompat.getColor(this, R.color.swipe_nav_background));
             swipeNavLayout.setBackgroundColor(ContextCompat.getColor(this, R.color.swipe_nav_background));
 
-            // Progress indicator setup
             this.mProgress = findViewById(R.id.progress);
             MedianProgressViewItem progressItem = application.mBridge.getProgressView(this);
             if (progressItem != null) {
@@ -439,7 +439,6 @@ public class MainActivity extends AppCompatActivity implements Observer,
                 this.mProgress.setupDefaultProgress();
             }
 
-            // proxy cookie manager for httpUrlConnection (syncs to webview cookies)
             CookieHandler.setDefault(new WebkitCookieManagerProxy());
 
             this.postLoadJavascript = getIntent().getStringExtra("postLoadJavascript");
@@ -447,27 +446,26 @@ public class MainActivity extends AppCompatActivity implements Observer,
 
             this.previousWebviewStates = new Stack<>();
 
-            // tab navigation
             this.tabManager = new TabManager(this, findViewById(R.id.bottom_navigation));
             tabManager.showTabs(false);
 
-            // actions in action bar
             this.actionManager = new ActionManager(this);
             this.actionManager.setupActionBar(isRoot);
 
             this.sideNavManager = new SideNavManager(this);
             this.sideNavManager.setupNavigationMenu(isRoot);
 
-            // Hide action bar if showActionBar is FALSE and showNavigationMenu is FALSE
             if (!appConfig.showActionBar && !appConfig.showNavigationMenu) {
                 Objects.requireNonNull(getSupportActionBar()).hide();
             }
 
-            // WebView setup
             this.webviewOverlay = findViewById(R.id.webviewOverlay);
-            this.mWebviewContainer = this.findViewById(R.id.webviewContainer);
+            this.mWebviewContainer = findViewById(R.id.webviewContainer);
+            if (mWebviewContainer == null) {
+                Log.e(TAG, "mWebviewContainer is null!");
+                return;
+            }
             this.mWebview = this.mWebviewContainer.getWebview();
-
             this.urlLoader = new UrlLoader(this, !appConfig.injectMedianJS);
 
             this.mWebviewContainer.setupWebview(this, isRoot);
@@ -477,33 +475,26 @@ public class MainActivity extends AppCompatActivity implements Observer,
             if (savedInstanceState != null) {
                 Bundle webViewStateBundle = savedInstanceState.getBundle(SAVED_STATE_WEBVIEW_STATE);
                 if (webViewStateBundle != null) {
-                    // Restore page and history
                     mWebview.restoreStateFromBundle(webViewStateBundle);
                     isWebViewStateRestored = true;
                 }
 
-                // Restore scroll state
                 int scrollX = savedInstanceState.getInt(SAVED_STATE_SCROLL_X, 0);
                 int scrollY = savedInstanceState.getInt(SAVED_STATE_SCROLL_Y, 0);
                 mWebview.scrollTo(scrollX, scrollY);
             }
 
-            // load url
             String url;
-
             if (isWebViewStateRestored && !TextUtils.isEmpty(mWebview.getUrl())) {
-                // WebView already has loaded URL when function mWebview.restoreStateFromBundle() was called
                 url = mWebview.getUrl();
             } else {
                 Intent intent = getIntent();
                 url = getUrlFromIntent(intent);
 
                 if (url == null && isRoot) url = appConfig.getInitialUrl();
-                // url from intent (hub and spoke nav)
                 if (url == null) url = intent.getStringExtra("url");
 
                 if (url != null) {
-                    // let plugins add query params to url before loading to WebView
                     Map<String, String> queries = application.mBridge.getInitialUrlQueryItems(this, isRoot);
                     if (queries != null && !queries.isEmpty()) {
                         Uri.Builder builder = Uri.parse(url).buildUpon();
@@ -516,7 +507,7 @@ public class MainActivity extends AppCompatActivity implements Observer,
                     this.initialUrl = url;
                     this.mWebview.loadUrl(url);
                 } else if (intent.getBooleanExtra(EXTRA_WEBVIEW_WINDOW_OPEN, false)) {
-                    // no worries, loadUrl will be called when this new web view is passed back to the message
+                    // No worries, loadUrl will be called when this new web view is passed back to the message
                 } else {
                     GNLog.getInstance().logError(TAG, "No url specified for MainActivity");
                 }
@@ -527,7 +518,6 @@ public class MainActivity extends AppCompatActivity implements Observer,
             sideNavManager.showNavigationMenu(isRoot && appConfig.showNavigationMenu);
 
             ViewCompat.setOnApplyWindowInsetsListener(content, (v, insets) -> {
-                // fix system navigation blocking bottom bar
                 Insets systemBarInsets = insets.getInsets(WindowInsetsCompat.Type.systemBars());
                 LinearLayout.LayoutParams layoutParams = (LinearLayout.LayoutParams) content.getLayoutParams();
                 layoutParams.bottomMargin = systemBarInsets.bottom;
@@ -541,7 +531,6 @@ public class MainActivity extends AppCompatActivity implements Observer,
 
             this.keyboardManager = new KeyboardManager(this, content);
 
-            // respond to navigation titles processed
             this.navigationTitlesChangedReceiver = new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context context, Intent intent) {
@@ -606,22 +595,25 @@ public class MainActivity extends AppCompatActivity implements Observer,
         }
     }
     private void loadRewardedAd() {
-        AdRequest adRequest = new AdRequest.Builder().build();
-        RewardedAd.load(this, "ca-app-pub-3940256099942544/5224354917", adRequest, new RewardedAdLoadCallback() {
-            @Override
-            public void onAdLoaded(@NonNull RewardedAd ad) {
-                rewardedAd = ad;
-                Log.d(TAG, "Rewarded ad loaded successfully");
-            }
+        if (cm.getActiveNetworkInfo() != null && cm.getActiveNetworkInfo().isConnected()) {
+            AdRequest adRequest = new AdRequest.Builder().build();
+            RewardedAd.load(this, "ca-app-pub-3940256099942544/5224354917", adRequest, new RewardedAdLoadCallback() {
+                @Override
+                public void onAdLoaded(@NonNull RewardedAd ad) {
+                    rewardedAd = ad;
+                    Log.d(TAG, "Rewarded ad loaded successfully");
+                }
 
-            @Override
-            public void onAdFailedToLoad(@NonNull LoadAdError loadAdError) {
-                rewardedAd = null;
-                Log.e(TAG, "Failed to load rewarded ad: " + loadAdError.getMessage());
-            }
-        });
+                @Override
+                public void onAdFailedToLoad(@NonNull LoadAdError loadAdError) {
+                    rewardedAd = null;
+                    Log.e(TAG, "Failed to load rewarded ad: " + loadAdError.getMessage());
+                }
+            });
+        } else {
+            Log.e(TAG, "No internet connection, cannot load rewarded ad");
+        }
     }
-
     private void showRewardedAd() {
         if (rewardedAd != null) {
             Log.d(TAG, "Showing rewarded ad");
@@ -629,6 +621,21 @@ public class MainActivity extends AppCompatActivity implements Observer,
                 @Override
                 public void onUserEarnedReward(@NonNull RewardItem rewardItem) {
                     Log.d(TAG, "User earned reward: " + rewardItem.getAmount() + " " + rewardItem.getType());
+                }
+            });
+            rewardedAd.setFullScreenContentCallback(new FullScreenContentCallback() {
+                @Override
+                public void onAdDismissedFullScreenContent() {
+                    Log.d(TAG, "Ad dismissed");
+                    rewardedAd = null;
+                    loadRewardedAd();
+                }
+
+                @Override
+                public void onAdFailedToShowFullScreenContent(@NonNull AdError adError) {
+                    Log.e(TAG, "Ad failed to show: " + adError.getMessage());
+                    rewardedAd = null;
+                    loadRewardedAd();
                 }
             });
         } else {
